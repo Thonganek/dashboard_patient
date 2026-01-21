@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard สรุปข้อมูลการบริการผู้ป่วย</title>
+    
+    <!-- Libraries -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
+    <!-- DataTables -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.4/css/dataTables.bootstrap5.min.css">
+    
+    <style>
+        :root {
+            --primary-green: #2ecc71;
+            --dark-green: #27ae60;
+            --light-green: #e9f7ef;
+            --text-color: #2c3e50;
+        }
+        
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #f8f9fa;
+            color: var(--text-color);
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, var(--dark-green), var(--primary-green));
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+            transition: transform 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            background-color: white;
+            border-bottom: 2px solid var(--light-green);
+            font-weight: 600;
+            color: var(--dark-green);
+            border-radius: 12px 12px 0 0 !important;
+        }
+
+        .kpi-card {
+            background: white;
+            border-left: 5px solid var(--primary-green);
+        }
+
+        .kpi-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--dark-green);
+        }
+
+        .kpi-label {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+
+        /* Fixed Graph Size Container */
+        .chart-container {
+            position: relative;
+            height: 300px; /* FIX HEIGHT */
+            width: 100%;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        .hidden { display: none !important; }
+        
+        /* Custom Scrollbar for tables */
+        .table-responsive::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .table-responsive::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Web App Config -->
+    <script>
+        // *** REPLACE WITH YOUR DEPLOYED WEB APP URL ***
+        // *** ต้องลงท้ายด้วย /exec และต้อง Deploy เป็น "Anyone" ***
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzg3Hqn5gP6geXw-TJ0b1XZGj1Z5VIoe8tWb66aiWXBGZMdjivvX-CWH6UuwYimZ9NiCw/exec";
+    </script>
+
+    <!-- Loading Screen -->
+    <div id="loading" class="loading-overlay">
+        <div class="spinner-border text-success" style="width: 3rem; height: 3rem;" role="status"></div>
+        <h5 class="mt-3 text-success">กำลังโหลดข้อมูล...</h5>
+        <small class="text-muted" id="loading-text">เชื่อมต่อฐานข้อมูล...</small>
+    </div>
+
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark navbar-expand-lg fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-hospital-user me-2"></i> Dashboard บริการผู้ป่วย
+            </a>
+            <div class="d-flex align-items-center">
+                <span id="user-status" class="text-white me-3 text-sm">ผู้เยี่ยมชม</span>
+                <button id="btn-login-modal" class="btn btn-light btn-sm rounded-pill text-success fw-bold" data-bs-toggle="modal" data-bs-target="#loginModal">
+                    <i class="fas fa-sign-in-alt"></i> เข้าสู่ระบบ
+                </button>
+                <button id="btn-logout" class="btn btn-outline-light btn-sm rounded-pill hidden" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i> ออกจากระบบ
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid" style="margin-top: 80px;">
+        
+        <!-- Controls & Filters -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <div class="card p-3">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label text-muted small">ตั้งแต่วันที่</label>
+                            <input type="date" id="filter-start" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label text-muted small">ถึงวันที่</label>
+                            <input type="date" id="filter-end" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-success btn-sm w-100" onclick="applyFilters()">
+                                <i class="fas fa-filter"></i> กรองข้อมูล
+                            </button>
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-secondary btn-sm w-100" onclick="resetFilters()">
+                                <i class="fas fa-undo"></i> รีเซ็ต
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card p-3 h-100 d-flex flex-row align-items-center justify-content-between">
+                    <div>
+                        <h6 class="mb-0 text-success fw-bold">นำเข้าข้อมูล (Excel/CSV)</h6>
+                        <small class="text-muted">เพิ่มข้อมูลใหม่เข้าระบบ</small>
+                    </div>
+                    <label class="btn btn-outline-success btn-sm">
+                        <i class="fas fa-upload"></i> Upload
+                        <input type="file" id="file-upload" accept=".xlsx, .xls, .csv" hidden onchange="handleFileUpload(this)">
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3 col-6">
+                <div class="card kpi-card p-3">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <div class="kpi-label">ผู้รับบริการทั้งหมด</div>
+                            <div class="kpi-value" id="kpi-total">0</div>
+                        </div>
+                        <div class="text-success opacity-50"><i class="fas fa-users fa-2x"></i></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card kpi-card p-3" style="border-left-color: #3498db;">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <div class="kpi-label">คะแนนความพึงพอใจเฉลี่ย</div>
+                            <div class="kpi-value" id="kpi-satisfaction">0.0</div>
+                        </div>
+                        <div class="text-primary opacity-50"><i class="fas fa-star fa-2x"></i></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card kpi-card p-3" style="border-left-color: #e67e22;">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <div class="kpi-label">เวลารอแพทย์เฉลี่ย (นาที)</div>
+                            <div class="kpi-value" id="kpi-wait-doc">0</div>
+                        </div>
+                        <div class="text-warning opacity-50"><i class="fas fa-user-md fa-2x"></i></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card kpi-card p-3" style="border-left-color: #e74c3c;">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <div class="kpi-label">ผู้ป่วยใหม่วันนี้</div>
+                            <div class="kpi-value" id="kpi-new-patient">0</div>
+                        </div>
+                        <div class="text-danger opacity-50"><i class="fas fa-user-plus fa-2x"></i></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="row">
+            <!-- Row 1: Demographics -->
+            <div class="col-md-3 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">เพศ</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="chartSex"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-5 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">ช่วงอายุ</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="chartAge"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">สิทธิการรักษา</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="chartInsurance"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2: Service Info -->
+            <div class="col-md-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">แผนกที่ใช้บริการ</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="chartDept"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">ประเภทผู้ป่วย & การนัดหมาย</div>
+                    <div class="card-body d-flex">
+                        <div class="w-50 px-1 text-center">
+                            <small>ประเภท</small>
+                            <div style="height: 200px; position: relative;">
+                                <canvas id="chartType"></canvas>
+                            </div>
+                        </div>
+                        <div class="w-50 px-1 text-center">
+                            <small>นัดหมาย</small>
+                            <div style="height: 200px; position: relative;">
+                                <canvas id="chartAppt"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">ผลลัพธ์การรักษา</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="chartOutcome"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 3: Waiting Times -->
+            <div class="col-12 mb-4">
+                <div class="card">
+                    <div class="card-header">วิเคราะห์ระยะเวลาการให้บริการ (เฉลี่ย & ช่วงเวลา)</div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <h6 class="text-center text-muted">เวลาลงทะเบียน</h6>
+                                <div class="chart-container" style="height: 250px;">
+                                    <canvas id="chartTimeReg"></canvas>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <h6 class="text-center text-muted">เวลารอพบแพทย์</h6>
+                                <div class="chart-container" style="height: 250px;">
+                                    <canvas id="chartTimeDoc"></canvas>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <h6 class="text-center text-muted">เวลารอรับยา</h6>
+                                <div class="chart-container" style="height: 250px;">
+                                    <canvas id="chartTimeDrug"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 4: Disease & Location -->
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">กลุ่มโรค (Top 10)</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="chartDiseaseGroup"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+             <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">รหัสโรคหลัก (ICD-10)</div>
+                    <div class="card-body">
+                        <div class="table-responsive" style="height: 300px;">
+                            <table id="tableICD" class="table table-sm table-striped table-hover" style="font-size: 0.9rem;">
+                                <thead><tr><th>รหัส</th><th>จำนวน</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 5: Others -->
+            <div class="col-md-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">ช่องทางการมา</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="chartChannel"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">คะแนนความพึงพอใจ</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="chartSatisfaction"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">อำเภอ/ตำบลที่อยู่</div>
+                    <div class="card-body">
+                        <select id="district-filter" class="form-select form-select-sm mb-2" onchange="filterDistrictTable()">
+                            <option value="">ทั้งหมด</option>
+                        </select>
+                        <div class="table-responsive" style="height: 250px;">
+                            <table id="tableDistrict" class="table table-sm table-striped">
+                                <thead><tr><th>พื้นที่</th><th>จำนวน</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Protected Section: Patient List -->
+        <div id="patient-section" class="row mb-5 hidden">
+            <div class="col-12">
+                <div class="card border-warning">
+                    <div class="card-header bg-warning text-dark">
+                        <i class="fas fa-lock me-2"></i> ข้อมูลรายบุคคล (สำหรับเจ้าหน้าที่)
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table id="tablePatients" class="table table-bordered table-hover w-100">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>วันที่</th>
+                                        <th>HN</th>
+                                        <th>เลขบัตรประชาชน</th>
+                                        <th>เพศ</th>
+                                        <th>อายุ</th>
+                                        <th>สิทธิ</th>
+                                        <th>แผนก</th>
+                                        <th>ICD-10</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Login Modal -->
+    <div class="modal fade" id="loginModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">เข้าสู่ระบบ</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="loginForm" onsubmit="handleLogin(event)">
+                        <div class="mb-3">
+                            <label>Username</label>
+                            <input type="text" id="username" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label>Password</label>
+                            <input type="password" id="password" class="form-control" required>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">Login</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <!-- Libraries with cross-origin fix and pinned versions -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js" crossorigin="anonymous"></script>
+    
+    <!-- Chart.js 4.4.1 (UMD) & Plugin 2.2.0 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0" crossorigin="anonymous"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11" crossorigin="anonymous"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+
+    <script>
+        // Global Error Handler
+        window.onerror = function(message, source, lineno, colno, error) {
+            console.error("Global Error:", message, source, lineno);
+            // Ignore generic script errors if app seems to be working
+            if(message.toLowerCase().includes('script error') && !window.hasCriticalError) {
+                console.warn("Cross-origin script error detected. Some external library might be blocked.");
+                return true; 
+            }
+        };
+
+        // Global State
+        let RAW_DATA = [];
+        let FILTERED_DATA = [];
+        let IS_LOGGED_IN = false;
+        let CHART_INSTANCES = {};
+
+        // Safe Initialization
+        try {
+            if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
+                Chart.register(ChartDataLabels);
+                Chart.defaults.set('plugins.datalabels', {
+                    color: '#fff',
+                    font: { weight: 'bold' },
+                    formatter: (value) => value > 0 ? value : ''
+                });
+                Chart.defaults.font.family = 'Sarabun';
+            } else {
+                console.warn("Chart.js or DataLabels plugin not loaded correctly.");
+            }
+        } catch(e) {
+            console.error("Error initializing Chart.js defaults:", e);
+        }
+
+        // --- Initialization ---
+        $(document).ready(function() {
+            // Check if URL is configured
+            if(WEB_APP_URL.includes("AKfycbzg3Hqn5gP6geXw")) {
+                console.warn("Using default URL.");
+            }
+            fetchData();
+        });
+
+        // --- API Helper (Improved) ---
+        async function callAPI(payload) {
+            const response = await fetch(WEB_APP_URL, {
+                method: 'POST',
+                redirect: 'follow',
+                headers: {
+                    'Content-Type': 'text/plain;charset=utf-8', 
+                },
+                body: JSON.stringify(payload)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP Error: ${response.status}`);
+            }
+            
+            return await response.json();
+        }
+
+        // --- API Calls ---
+        async function fetchData() {
+            $('#loading').removeClass('hidden');
+            $('#loading-text').text("กำลังดึงข้อมูล...");
+            try {
+                const result = await callAPI({ action: 'getData' });
+                
+                if (result.status === 'success') {
+                    RAW_DATA = result.data;
+                    initDateFilters();
+                    applyFilters();
+                } else {
+                    console.error(result);
+                    Swal.fire('Error', 'ไม่สามารถโหลดข้อมูลได้: ' + result.message, 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                let msg = 'ไม่สามารถเชื่อมต่อ Server ได้';
+                if(err.message.includes("Failed to fetch")) {
+                    msg += '\n(ตรวจสอบ URL หรือ CORS)';
+                }
+                Swal.fire('Connection Error', msg, 'error');
+            } finally {
+                $('#loading').addClass('hidden');
+            }
+        }
+
+        async function sendImportData(jsonData) {
+            $('#loading').removeClass('hidden');
+            $('#loading-text').text("กำลังบันทึกข้อมูล...");
+            try {
+                const result = await callAPI({ action: 'addData', data: jsonData });
+                
+                if (result.status === 'success') {
+                    Swal.fire('สำเร็จ', result.message, 'success');
+                    fetchData(); // Refresh Dashboard
+                } else {
+                    Swal.fire('Error', result.message, 'error');
+                }
+            } catch (err) {
+                Swal.fire('Error', 'Import failed: ' + err.message, 'error');
+            } finally {
+                $('#loading').addClass('hidden');
+            }
+        }
+
+        // --- Authentication (Improved) ---
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const u = $('#username').val();
+            const p = $('#password').val();
+
+            if (!WEB_APP_URL || WEB_APP_URL === "") {
+                Swal.fire('Error', 'กรุณาระบุ WEB_APP_URL ใน Code', 'error');
+                return;
+            }
+
+            try {
+                const result = await callAPI({ action: 'login', username: u, password: p });
+
+                if (result.status === 'success') {
+                    IS_LOGGED_IN = true;
+                    $('#loginModal').modal('hide');
+                    $('#btn-login-modal').addClass('hidden');
+                    $('#btn-logout').removeClass('hidden');
+                    $('#user-status').text(result.name || 'ผู้ดูแลระบบ');
+                    $('#patient-section').removeClass('hidden');
+                    
+                    updatePatientTable();
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'ยินดีต้อนรับ',
+                        text: `เข้าสู่ระบบในฐานะ: ${result.role}`,
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                } else {
+                    Swal.fire('เข้าสู่ระบบไม่สำเร็จ', result.message, 'warning');
+                }
+            } catch (err) {
+                console.error("Login Error Details:", err);
+                Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถติดต่อเซิร์ฟเวอร์ได้\n' + err.message, 'error');
+            }
+        }
+
+        // --- Logic (Same as before) ---
+
+        function initDateFilters() {
+            if(RAW_DATA.length === 0) return;
+            const dates = RAW_DATA.map(d => new Date(d['วันที่รับบริการ'])).filter(d => !isNaN(d));
+            if(dates.length === 0) return;
+            
+            const minDate = new Date(Math.min.apply(null, dates));
+            const maxDate = new Date(Math.max.apply(null, dates));
+            document.getElementById('filter-start').valueAsDate = minDate;
+            document.getElementById('filter-end').valueAsDate = maxDate;
+        }
+
+        function applyFilters() {
+            const startStr = document.getElementById('filter-start').value;
+            const endStr = document.getElementById('filter-end').value;
+            
+            if (!startStr || !endStr) {
+                FILTERED_DATA = RAW_DATA;
+            } else {
+                const start = new Date(startStr);
+                const end = new Date(endStr);
+                end.setHours(23, 59, 59); 
+                FILTERED_DATA = RAW_DATA.filter(item => {
+                    const d = new Date(item['วันที่รับบริการ']);
+                    return d >= start && d <= end;
+                });
+            }
+
+            updateKPIs();
+            renderCharts();
+            renderTables();
+            if (IS_LOGGED_IN) updatePatientTable();
+        }
+
+        function resetFilters() {
+            initDateFilters();
+            applyFilters();
+        }
+
+        function updateKPIs() {
+            const count = FILTERED_DATA.length;
+            const avgSat = average(FILTERED_DATA.map(d => parseFloat(d['คะแนนความพึงพอใจ (1-5)'] || 0)));
+            const avgWait = average(FILTERED_DATA.map(d => parseFloat(d['เวลารอพบแพทย์ (นาที)'] || 0)));
+            
+            const endDateStr = document.getElementById('filter-end').value;
+            const newPatients = FILTERED_DATA.filter(d => 
+                d['ประเภทผู้ป่วย'] === 'ใหม่' && d['วันที่รับบริการ'].startsWith(endDateStr)
+            ).length;
+
+            $('#kpi-total').text(count.toLocaleString());
+            $('#kpi-satisfaction').text(avgSat.toFixed(2));
+            $('#kpi-wait-doc').text(Math.round(avgWait));
+            $('#kpi-new-patient').text(newPatients);
+        }
+
+        // --- Chart Rendering ---
+        
+        function renderCharts() {
+            if (typeof Chart === 'undefined') {
+                 console.error("Chart.js not loaded");
+                 return;
+            }
+
+            const getCounts = (key) => {
+                const counts = {};
+                FILTERED_DATA.forEach(d => {
+                    const val = d[key] || 'ไม่ระบุ';
+                    counts[val] = (counts[val] || 0) + 1;
+                });
+                return counts;
+            };
+
+            const createChart = (id, type, labels, data, colors, options = {}) => {
+                const ctxCanvas = document.getElementById(id);
+                if(!ctxCanvas) return; 
+                const ctx = ctxCanvas.getContext('2d');
+                
+                if (CHART_INSTANCES[id]) CHART_INSTANCES[id].destroy();
+
+                const defaultOptions = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: type !== 'bar' },
+                        datalabels: {
+                            color: type === 'bar' ? '#444' : '#fff',
+                            anchor: type === 'bar' ? 'end' : 'center',
+                            align: type === 'bar' ? 'top' : 'center',
+                        }
+                    },
+                    scales: type === 'bar' ? { y: { beginAtZero: true } } : {}
+                };
+
+                CHART_INSTANCES[id] = new Chart(ctx, {
+                    type: type,
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: data,
+                            backgroundColor: colors,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: { ...defaultOptions, ...options }
+                });
+            };
+
+            // 1. Sex
+            const sexData = getCounts('เพศ');
+            createChart('chartSex', 'bar', Object.keys(sexData), Object.values(sexData), ['#3498db', '#e74c3c']);
+
+            // 2. Age Groups
+            const ageGroups = { '0-5': 0, '6-12': 0, '13-18': 0, '19-25': 0, '26-59': 0, '60+': 0 };
+            FILTERED_DATA.forEach(d => {
+                const age = parseInt(d['อายุ']) || 0;
+                if (age <= 5) ageGroups['0-5']++;
+                else if (age <= 12) ageGroups['6-12']++;
+                else if (age <= 18) ageGroups['13-18']++;
+                else if (age <= 25) ageGroups['19-25']++;
+                else if (age <= 59) ageGroups['26-59']++;
+                else ageGroups['60+']++;
+            });
+            createChart('chartAge', 'bar', Object.keys(ageGroups), Object.values(ageGroups), '#2ecc71');
+
+            // 3. Insurance
+            const insData = getCounts('สิทธิการรักษา');
+            createChart('chartInsurance', 'bar', Object.keys(insData), Object.values(insData), '#9b59b6');
+
+            // 4. Department
+            const deptData = getCounts('แผนก');
+            createChart('chartDept', 'bar', Object.keys(deptData), Object.values(deptData), '#f1c40f');
+
+            // 5. Type (Pie)
+            const typeData = getCounts('ประเภทผู้ป่วย');
+            createChart('chartType', 'pie', Object.keys(typeData), Object.values(typeData), ['#1abc9c', '#e67e22']);
+
+            // 6. Appointment (Pie)
+            const apptData = getCounts('การนัดหมาย');
+            createChart('chartAppt', 'doughnut', Object.keys(apptData), Object.values(apptData), ['#34495e', '#95a5a6']);
+
+            // 7. Outcome
+            const outcomeData = getCounts('ผลลัพธ์การรักษา');
+            createChart('chartOutcome', 'bar', Object.keys(outcomeData), Object.values(outcomeData), '#e74c3c');
+
+            // 8. Time Analysis
+            renderTimeChart('chartTimeReg', 'เวลาลงทะเบียน (นาที)');
+            renderTimeChart('chartTimeDoc', 'เวลารอพบแพทย์ (นาที)');
+            renderTimeChart('chartTimeDrug', 'เวลารอรับยา (นาที)');
+
+            // 9. Disease Group
+            const diseaseData = getCounts('กลุ่มโรค');
+            const sortedDisease = Object.entries(diseaseData).sort((a,b) => b[1]-a[1]).slice(0, 10);
+            createChart('chartDiseaseGroup', 'bar', sortedDisease.map(x=>x[0]), sortedDisease.map(x=>x[1]), '#e67e22', { indexAxis: 'y' });
+
+            // 10. Channel
+            const channelData = getCounts('ช่องทางการมา');
+            createChart('chartChannel', 'bar', Object.keys(channelData), Object.values(channelData), '#16a085');
+
+            // 11. Satisfaction
+            const satData = { '1':0, '2':0, '3':0, '4':0, '5':0 };
+            FILTERED_DATA.forEach(d => {
+                const s = Math.round(d['คะแนนความพึงพอใจ (1-5)']);
+                if (satData[s] !== undefined) satData[s]++;
+            });
+            createChart('chartSatisfaction', 'bar', Object.keys(satData), Object.values(satData), ['#c0392b', '#e74c3c', '#f1c40f', '#2ecc71', '#27ae60']);
+        }
+
+        function renderTimeChart(canvasId, key) {
+             const ranges = { '0-15': 0, '16-30': 0, '31-60': 0, '>60': 0 };
+             let total = 0, count = 0;
+             
+             FILTERED_DATA.forEach(d => {
+                 const min = parseInt(d[key]) || 0;
+                 total += min;
+                 count++;
+                 if(min <= 15) ranges['0-15']++;
+                 else if(min <= 30) ranges['16-30']++;
+                 else if(min <= 60) ranges['31-60']++;
+                 else ranges['>60']++;
+             });
+
+             const avg = count > 0 ? (total/count).toFixed(1) : 0;
+             const ctxCanvas = document.getElementById(canvasId);
+             if(!ctxCanvas) return;
+             const ctx = ctxCanvas.getContext('2d');
+
+             if(CHART_INSTANCES[canvasId]) CHART_INSTANCES[canvasId].destroy();
+
+             CHART_INSTANCES[canvasId] = new Chart(ctx, {
+                 type: 'bar',
+                 data: {
+                     labels: Object.keys(ranges),
+                     datasets: [{
+                         label: `เฉลี่ย: ${avg} นาที`,
+                         data: Object.values(ranges),
+                         backgroundColor: '#3498db'
+                     }]
+                 },
+                 options: {
+                     responsive: true,
+                     maintainAspectRatio: false,
+                     plugins: {
+                         legend: { display: true },
+                         datalabels: { color: '#444', anchor: 'end', align: 'top' }
+                     }
+                 }
+             });
+        }
+
+        function renderTables() {
+            const icdCounts = {};
+            FILTERED_DATA.forEach(d => {
+                const code = d['รหัสโรคหลัก (ICD-10)'];
+                if(code) icdCounts[code] = (icdCounts[code] || 0) + 1;
+            });
+            const icdRows = Object.entries(icdCounts).sort((a,b) => b[1]-a[1])
+                .map(([code, count]) => `<tr><td>${code}</td><td>${count}</td></tr>`).join('');
+            $('#tableICD tbody').html(icdRows);
+
+            const distCounts = {};
+            const districts = new Set();
+            FILTERED_DATA.forEach(d => {
+                const dist = d['อำเภอ/ตำบลที่อยู่'] || 'ไม่ระบุ';
+                distCounts[dist] = (distCounts[dist] || 0) + 1;
+                districts.add(dist);
+            });
+
+            const $sel = $('#district-filter');
+            if($sel.children().length <= 1) {
+                Array.from(districts).sort().forEach(d => {
+                    $sel.append(`<option value="${d}">${d}</option>`);
+                });
+            }
+            filterDistrictTable(); 
+        }
+
+        function filterDistrictTable() {
+            const selected = $('#district-filter').val();
+            const counts = {};
+            
+            FILTERED_DATA.forEach(d => {
+                const dist = d['อำเภอ/ตำบลที่อยู่'] || 'ไม่ระบุ';
+                if (!selected || dist === selected) {
+                    counts[dist] = (counts[dist] || 0) + 1;
+                }
+            });
+
+            const rows = Object.entries(counts).sort((a,b) => b[1]-a[1])
+                .map(([d, c]) => `<tr><td>${d}</td><td>${c}</td></tr>`).join('');
+            $('#tableDistrict tbody').html(rows);
+        }
+
+        function logout() {
+            IS_LOGGED_IN = false;
+            $('#btn-login-modal').removeClass('hidden');
+            $('#btn-logout').addClass('hidden');
+            $('#user-status').text('ผู้เยี่ยมชม');
+            $('#patient-section').addClass('hidden');
+            Swal.fire('ออกจากระบบ', '', 'info');
+        }
+
+        function updatePatientTable() {
+            if (!IS_LOGGED_IN) return;
+            if ($.fn.DataTable.isDataTable('#tablePatients')) {
+                $('#tablePatients').DataTable().destroy();
+            }
+
+            const rows = FILTERED_DATA.map(d => `
+                <tr>
+                    <td>${d['วันที่รับบริการ']}</td>
+                    <td>${d['HN']}</td>
+                    <td>${d['เลขบัตรประชาชน']}</td>
+                    <td>${d['เพศ']}</td>
+                    <td>${d['อายุ']}</td>
+                    <td>${d['สิทธิการรักษา']}</td>
+                    <td>${d['แผนก']}</td>
+                    <td>${d['รหัสโรคหลัก (ICD-10)']}</td>
+                </tr>
+            `).join('');
+            
+            $('#tablePatients tbody').html(rows);
+            $('#tablePatients').DataTable({
+                language: { url: '//cdn.datatables.net/plug-ins/1.13.4/i18n/th.json' },
+                order: [[0, 'desc']]
+            });
+        }
+
+        function handleFileUpload(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+
+                if (jsonData.length > 0) {
+                    Swal.fire({
+                        title: 'ยืนยันการนำเข้า',
+                        text: `พบข้อมูล ${jsonData.length} รายการ`,
+                        icon: 'question',
+                        showCancelButton: true,
+                        confirmButtonText: 'Upload',
+                        cancelButtonText: 'Cancel'
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            sendImportData(jsonData);
+                        } else {
+                            input.value = '';
+                        }
+                    });
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        const average = arr => arr.length ? arr.reduce((p, c) => p + c, 0) / arr.length : 0;
+
+    </script>
+</body>
+</html>
